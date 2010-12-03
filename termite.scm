@@ -3,43 +3,43 @@
 
 ;; this is the main file for the Termite system
 
-(export
- ;; Termite "primordials"
- self ! ? ?? !? on make-node spawn pid? 
- spawn-link remote-spawn remote-spawn-link
- ;; Useful
- make-tag current-node
- ;; Process linking for error propagation
- inbound-link outbound-link full-link
- ;; Wrap Gambit's I/O
- spawn-output-port spawn-input-port
- ;; Migration
- migrate-task migrate/proxy 
- ;; Useful condition reporting/logging procedures
- warning debug info
- ;; Node stuff
- node-init node? node-host node-port 
- ;; Nameserver mechanism
- ;; make-nameserver-node By Per: This doesn't seem to be defined?
- ;; Publishing and resolving names for services
- publish-service unpublish-service resolve-service remote-service
- ;; default init and node names for convenience
- node1 node2
- ;; *termite-nameserver-port* By Per: This doesn't seem to be defined?
- ;; Useful
- ping
+;; (export
+;;  ;; Termite "primordials"
+;;  self ! ? ?? !? on make-node spawn pid? 
+;;  spawn-link remote-spawn remote-spawn-link
+;;  ;; Useful
+;;  make-tag current-node
+;;  ;; Process linking for error propagation
+;;  inbound-link outbound-link full-link
+;;  ;; Wrap Gambit's I/O
+;;  spawn-output-port spawn-input-port
+;;  ;; Migration
+;;  migrate-task migrate/proxy 
+;;  ;; Useful condition reporting/logging procedures
+;;  warning debug info
+;;  ;; Node stuff
+;;  node-init node? node-host node-port 
+;;  ;; Nameserver mechanism
+;;  ;; make-nameserver-node By Per: This doesn't seem to be defined?
+;;  ;; Publishing and resolving names for services
+;;  publish-service unpublish-service resolve-service remote-service
+;;  ;; default init and node names for convenience
+;;  node1 node2
+;;  ;; *termite-nameserver-port* By Per: This doesn't seem to be defined?
+;;  ;; Useful
+;;  ping
  
- (re-export: uuid
-	     otp/gen_server
-	     data
-	     deftype
-	     recv
-	     match))
+;;  (re-export: uuid
+;; 	     otp/gen_server
+;; 	     data
+;; 	     deftype
+;; 	     recv
+;; 	     match))
 
 (import termite_core
         recv
         data
-        otp/gen_event
+        gen_event
         match)
 
 (declare
@@ -53,62 +53,62 @@
 ;; LINKER (to establish exception-propagation links between processes)
 (define linker
   (spawn
-	(lambda ()
-	  (let loop ()
-		(recv
-		  (('link from to)
-		   (cond
-			 ((process? from)
-			  (process-links-set! from (cons to (process-links from)))) ;;;;;;;;;;
-			 ((upid? from)
-			  (! (remote-service 'linker (upid-node from))
-				 (list 'link from to)))
-			 (else
-			   (warning "in linker-loop: unknown object"))))
-		  (msg
-			(warning "linker ignored message: " msg)))
-		(loop)))
-    name: 'termite-linker))
+   (lambda ()
+     (let loop ()
+       (recv
+        (('link from to)
+         (cond
+          ((process? from)
+           (process-links-set! from (cons to (process-links from)))) ;;;;;;;;;;
+          ((upid? from)
+           (! (remote-service 'linker (upid-node from))
+              (list 'link from to)))
+          (else
+           (warning "in linker-loop: unknown object"))))
+        (msg
+         (warning "linker ignored message: " msg)))
+       (loop)))
+   name: 'termite-linker))
 
 
 ;; Remote spawning
 ;; the SPAWNER answers remote-spawn request
 (define spawner
   (spawn
-	(lambda ()
-	  (let loop ()
-		(recv
-		  ((from tag ('spawn thunk links name))
-		   (! from (list tag (spawn thunk links: links name: name))))
+   (lambda ()
+     (let loop ()
+       (recv
+        ((from tag ('spawn thunk links name))
+         (! from (list tag (spawn thunk links: links name: name))))
 
-		  (msg
-			(warning "spawner ignored message: " msg)))
-		(loop)))
-    name: 'termite-spawner))
+        (msg
+         (warning "spawner ignored message: " msg)))
+       (loop)))
+   name: 'termite-spawner))
 
 ;; the PUBLISHER is used to implement a mutable global env. for
 ;; process names
 (define publisher
   (spawn 
-	(lambda ()
-	  (define dict (make-dict))
+   (lambda ()
+     (define dict (make-dict))
 
-	  (let loop ()
-		(recv
-		  (('publish name pid)
-		   (dict-set! dict name pid))
+     (let loop ()
+       (recv
+        (('publish name pid)
+         (dict-set! dict name pid))
 
-		  (('unpublish name pid)
-		   (dict-set! dict name))
+        (('unpublish name pid)
+         (dict-set! dict name))
 
-		  ((from tag ('resolve name))
-		   (! from (list tag (dict-ref dict name))))
+        ((from tag ('resolve name))
+         (! from (list tag (dict-ref dict name))))
 
-		  (msg
-			(warning "puslisher ignored message: " msg)))
+        (msg
+         (warning "puslisher ignored message: " msg)))
 
-		(loop)))
-    name: 'termite-publisher))
+       (loop)))
+   name: 'termite-publisher))
 
 (define (publish-service name pid)
   (! publisher (list 'publish name pid)))
@@ -124,6 +124,50 @@
 ;; published with |publish-service| to the name 'service-name'.
 (define (remote-service service-name node)
   (make-upid service-name node))
+
+
+
+
+
+
+
+
+
+;; * Start a new process on remote node 'node', executing the code 
+;; in 'thunk'.
+(define (remote-spawn node thunk #!key (links '()) (name 'anonymous-remote))
+  (if (equal? node (current-node))
+      (spawn thunk links: links name: name)
+      (!? (remote-service 'spawner node)
+          (list 'spawn thunk links name))))
+
+
+;; * Start a new process on remote node 'node', with a bidirectional
+;; link to the current process.
+(define (remote-spawn-link node thunk)
+  (let ((pid (remote-spawn node thunk links: (list (self)))))
+    (outbound-link pid)
+    pid))
+
+
+;; * Evaluate a 'thunk' on a remote node and return the result of that
+;; evaluation.  Just like for |!?|, |?| and |??|, it is possible to
+;; specify a 'timeout' and a 'default' argument.
+(define (on node thunk)
+  (let ((tag (make-tag))
+        (from (self)))
+    (remote-spawn node
+                  (lambda ()
+                    (! from (list tag (thunk)))))
+    (recv
+     ((,tag reply) reply))))
+
+
+
+
+
+
+
 
 
 ;; ----------------------------------------------------------------------------
@@ -200,39 +244,39 @@
 
 (define (report-event event port)
   (match event
-    ((type who messages)
-     (with-output-to-port port
-       (lambda ()
-         (newline)
-         (display "[")
-         (display type)
-         (display "] ")
-         (display (formatted-current-time))
-         (newline)
-         (display who)
-         (newline)
-         (for-each (lambda (m) (display m) (newline)) messages)
-         (force-output))))
-    (_ (display "catch-all rule invoked in reporte-event")))
+         ((type who messages)
+          (with-output-to-port port
+            (lambda ()
+              (newline)
+              (display "[")
+              (display type)
+              (display "] ")
+              (display (formatted-current-time))
+              (newline)
+              (display who)
+              (newline)
+              (for-each (lambda (m) (display m) (newline)) messages)
+              (force-output))))
+         (_ (display "catch-all rule invoked in reporte-event")))
   port)
 
 (define file-output-log-handler
   (make-event-handler
-	;; init
-	(lambda (args)
-	  (match args
-		((filename) 
-         (open-output-file (list path: filename
-                                 create: 'maybe
-                                 append: #t)))))
-	;; event
-	report-event
-	;; call
-	(lambda (term port)
-	  (values (void) port))
-	;; shutdown
-	(lambda (reason port)
-	  (close-output-port port))))
+   ;; init
+   (lambda (args)
+     (match args
+            ((filename) 
+             (open-output-file (list path: filename
+                                     create: 'maybe
+                                     append: #t)))))
+   ;; event
+   report-event
+   ;; call
+   (lambda (term port)
+     (values (void) port))
+   ;; shutdown
+   (lambda (reason port)
+     (close-output-port port))))
 
 
 ;; 'type' is a keyword (error warning info debug)
@@ -254,14 +298,14 @@
 
 (define ping-server
   (spawn 
-	(lambda ()
-	  (let loop ()
-		(recv
-		  ((from tag 'ping) 
-		   (! from (list tag 'pong)))
-		  (msg (debug "ping-server ignored message" msg)))
-		(loop)))
-    name: 'termite-ping-server))
+   (lambda ()
+     (let loop ()
+       (recv
+        ((from tag 'ping) 
+         (! from (list tag 'pong)))
+        (msg (debug "ping-server ignored message" msg)))
+       (loop)))
+   name: 'termite-ping-server))
 
 (define (ping node #!optional (timeout 1.0))
   (!? (remote-service 'ping-server node) 'ping timeout 'no-reply))

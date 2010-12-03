@@ -94,6 +94,33 @@
 ;; * Get the pid of the current process.
 (define self current-thread)
 
+
+;; * Cleanly stop the execution of the current process.  Linked
+;; processes will receive a "normal" exit message.
+(define (shutdown!)
+  (for-each
+	(lambda (pid)
+	  (! pid (make-termite-exception (self) 'normal #f)))
+	(process-links (self)))
+  (halt!))
+
+;; this is *not* nice: it wont propagate the exit message to the other
+;; processes
+(define (halt!)
+  (thread-terminate! (current-thread)))
+
+
+;; * Forcefully terminate a local process.  Warning: it only works on
+;; local processes!  This should be used with caution. 
+(define (terminate! victim)
+  (thread-terminate! victim)
+  (for-each
+	(lambda (link)
+	  (! link (make-termite-exception victim 'terminated #f)))
+	(process-links victim)))
+
+
+
 ;; Base exception handler for Termite processes.
 (define (base-exception-handler e)
   (continuation-capture
@@ -149,48 +176,6 @@
   (let ((pid (spawn thunk links: (list (self)) name: name)))
 	(outbound-link pid)
 	pid))
-
-
-;; * Start a new process on remote node 'node', executing the code 
-;; in 'thunk'.
-(define (remote-spawn node thunk #!key (links '()) (name 'anonymous-remote))
-  (if (equal? node (current-node))
-	  (spawn thunk links: links name: name)
-	  (!? (remote-service 'spawner node)
-		  (list 'spawn thunk links name))))
-
-
-;; * Start a new process on remote node 'node', with a bidirectional
-;; link to the current process.
-(define (remote-spawn-link node thunk)
-  (let ((pid (remote-spawn node thunk links: (list (self)))))
-	(outbound-link pid)
-	pid))
-
-
-;; * Cleanly stop the execution of the current process.  Linked
-;; processes will receive a "normal" exit message.
-(define (shutdown!)
-  (for-each
-	(lambda (pid)
-	  (! pid (make-termite-exception (self) 'normal #f)))
-	(process-links (self)))
-  (halt!))
-
-;; this is *not* nice: it wont propagate the exit message to the other
-;; processes
-(define (halt!)
-  (thread-terminate! (current-thread)))
-
-
-;; * Forcefully terminate a local process.  Warning: it only works on
-;; local processes!  This should be used with caution. 
-(define (terminate! victim)
-  (thread-terminate! victim)
-  (for-each
-	(lambda (link)
-	  (! link (make-termite-exception victim 'terminated #f)))
-	(process-links victim)))
 
 
 ;; TODO 'wait-for' and 'alive?' should be grouped in a more general
@@ -341,19 +326,6 @@
         (after timeout default))))))
 
 
-;; * Evaluate a 'thunk' on a remote node and return the result of that
-;; evaluation.  Just like for |!?|, |?| and |??|, it is possible to
-;; specify a 'timeout' and a 'default' argument.
-(define (on node thunk)
-  (let ((tag (make-tag))
-        (from (self)))
-    (remote-spawn node
-                  (lambda ()
-                    (! from (list tag (thunk)))))
-    (recv
-     ((,tag reply) reply))))
-
-
 ;; ----------------------------------------------------------------------------
 ;; Links and exception handling
 
@@ -480,7 +452,10 @@
    ((table-ref *foreign->local* obj #f)
     => (lambda (pid) pid))
    ((and (symbol? (upid-tag obj))
-         (resolve-service (upid-tag obj)))
+         ;;;;;;;;;;;;;;;;;;;;; ABERRATIO!!!!!! TODO
+         #t
+         ;(resolve-service (upid-tag obj))
+         )
     => (lambda (pid) 
          pid))
    (else

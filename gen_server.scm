@@ -7,8 +7,8 @@
 ;;; CAST      :: term   state -> state
 ;;; TERMINATE :: reason state -> void
 
-(import ../termite_core
-        ../recv)
+(import termite_core
+        recv)
 
 (export make-server-plugin
         server:start

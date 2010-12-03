@@ -1,4 +1,6 @@
-(import (only: match match/action)
+;; (import (only: match match/action)
+;;         exception)
+(import match
         exception)
 
 ;; All hail the RECV form

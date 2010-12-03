@@ -1,0 +1,10 @@
+(package
+ (version v0.1)
+ (maintainer "Álvaro Castro-Castilla http://castrocastilla.com")
+ (author "Guillaume Germain")
+ (description "Lightweight multithreading for Scheme")
+ (keywords termite multithreading server greenthreads)
+ (license mit)
+
+ (exported-modules)
+ (default-module termite))

@@ -7,10 +7,10 @@
 ;;; CALL      :: args   state  -> reply state
 ;;; TERMINATE :: reason state  -> void
 
-(import ../recv
-        ../termite_core
-        ../match
-        ../utils)
+(import recv
+        termite_core
+        match
+        utils)
 
 (define-type event-handler
   id: 1d3007b8-c5aa-4090-ab55-e352040a4498
